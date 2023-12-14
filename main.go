@@ -1,38 +1,50 @@
 package main
 
 import (
-	"log"
 	"nano/api"
+	"nano/logger"
+	"nano/ui"
 
-	"github.com/fatih/color"
+	"log"
+	"os"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/spf13/viper"
-	bolt "go.etcd.io/bbolt"
+	"go.etcd.io/bbolt"
 )
 
 func main() {
-	info := color.New(color.Bold, color.FgBlue).PrintlnFunc()
-	// warning := color.New(color.BgYellow).PrintfFunc()
-	error := color.New(color.BgRed).PrintlnFunc()
-
 	config()
+	initalise()
 
-	info("Nano v0.0.1 - Your personal cloud")
-
-	db, err := bolt.Open(viper.GetString("database"), 0600, nil)
-
+	db, err := bbolt.Open("./"+viper.GetString("data_dir")+"/"+viper.GetString("database"), 0600, nil)
 	if err != nil {
-		error("Error opening database, %s", err)
+		logger.Error("Error opening database: ", err)
 	}
 
 	defer db.Close()
 
-	stopApi := api.Start(db)
-	defer stopApi()
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+	})
+
+	app.All("/*", filesystem.New(filesystem.Config{
+		Root: ui.Dist(),
+	}))
+
+	api.CreateApiRoutes(app, db)
+
+	logger.Subtle("Running on http://localhost:" + viper.GetString("port"))
+
+	defer app.Shutdown()
+	app.Listen(":" + viper.GetString("port"))
 }
 
 func config() {
 	viper.SetDefault("port", "8080")
 	viper.SetDefault("database", "nano.db")
+	viper.SetDefault("data_dir", "nano-data")
 
 	viper.SetConfigName("prod")
 	viper.SetConfigType("env")
@@ -43,4 +55,16 @@ func config() {
 	if err != nil {
 		log.Panic("Error reading config file: ", err)
 	}
+}
+
+func initalise() {
+	if _, err := os.Stat("./" + viper.GetString("data_dir")); os.IsNotExist(err) {
+		err := os.Mkdir("./"+viper.GetString("data_dir"), 0755)
+
+		if err != nil {
+			logger.Error("Error creating nano-data directory: ", err)
+		}
+	}
+
+	logger.Info("Nano v0.0.1 - Your personal cloud")
 }
